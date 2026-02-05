@@ -1,11 +1,9 @@
 ENTRY(kernel_main)
 
 SECTIONS {
-    /* Kernel will be loaded at 0x1000 physical address */
     . = 0x1000;
 
     .text ALIGN(4) : {
-        /* Ensure entry point is at the beginning */
         *(.text.start)
         *(.text)
     }
@@ -23,10 +21,9 @@ SECTIONS {
         *(.bss)
     }
 
-    /* Discard unnecessary sections */
     /DISCARD/ : {
         *(.comment)
         *(.eh_frame)
         *(.note.gnu.build-id)
     }
-} 
+}
