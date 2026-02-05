@@ -1,6 +1,11 @@
-// Calculator OS with I Ching, Asciimojis, and Lasagna
+// Calculator OS v0.2
+// Supports Level 1 & 2 math operations
+
+#include "math.h"
+#include "extras.h"
 
 #define VGA_MEMORY 0xB8000
+#define SERIAL_PORT 0x3F8
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
 #define VGA_COLOR(fg, bg) ((bg << 4) | fg)
@@ -11,10 +16,10 @@
 unsigned short cursor_pos = 0;
 char input_buffer[256];
 unsigned char input_length = 0;
-unsigned char input_position = 0;
 int shift_pressed = 0;
 unsigned int rand_seed = 12345;
 
+// I/O functions
 unsigned char inb(unsigned short port) {
     unsigned char result;
     __asm__ volatile("inb %1, %0" : "=a" (result) : "dN" (port));
@@ -25,7 +30,68 @@ void outb(unsigned short port, unsigned char value) {
     __asm__ volatile("outb %0, %1" : : "a" (value), "dN" (port));
 }
 
-void update_cursor() {
+// Serial port functions for debugging
+void serial_init(void) {
+    outb(SERIAL_PORT + 1, 0x00);  // Disable interrupts
+    outb(SERIAL_PORT + 3, 0x80);  // Enable DLAB
+    outb(SERIAL_PORT + 0, 0x03);  // Divisor low byte (38400 baud)
+    outb(SERIAL_PORT + 1, 0x00);  // Divisor high byte
+    outb(SERIAL_PORT + 3, 0x03);  // 8 bits, no parity, 1 stop
+    outb(SERIAL_PORT + 2, 0xC7);  // Enable FIFO
+    outb(SERIAL_PORT + 4, 0x0B);  // IRQs enabled, RTS/DSR set
+}
+
+void serial_putc(char c) {
+    while ((inb(SERIAL_PORT + 5) & 0x20) == 0);  // Wait for empty transmit
+    outb(SERIAL_PORT, c);
+}
+
+void serial_puts(const char* s) {
+    while (*s) {
+        if (*s == '\n') serial_putc('\r');
+        serial_putc(*s++);
+    }
+}
+
+void serial_putint(int num) {
+    if (num < 0) { serial_putc('-'); num = -num; }
+    if (num == 0) { serial_putc('0'); return; }
+    char buf[12];
+    int i = 0;
+    while (num > 0) { buf[i++] = '0' + (num % 10); num /= 10; }
+    while (i > 0) serial_putc(buf[--i]);
+}
+
+void serial_putdouble(double num) {
+    if (num < 0) { serial_putc('-'); num = -num; }
+    // Scale to integer to avoid float-to-int conversion issues
+    // Multiply by 10000 for 4 decimal places
+    int scaled = (int)(num * 10000.0 + 0.5);  // with rounding
+    int int_part = scaled / 10000;
+    int frac_part = scaled % 10000;
+    
+    serial_putint(int_part);
+    serial_putc('.');
+    
+    // Print fractional part with leading zeros
+    if (frac_part < 1000) serial_putc('0');
+    if (frac_part < 100) serial_putc('0');
+    if (frac_part < 10) serial_putc('0');
+    if (frac_part > 0) serial_putint(frac_part);
+    else serial_putc('0');
+}
+
+// Initialize FPU with proper control word
+void init_fpu(void) {
+    unsigned short cw = 0x037F;  // Default FPU control word: all exceptions masked
+    __asm__ volatile(
+        "fninit\n"
+        "fldcw %0\n"
+        : : "m" (cw)
+    );
+}
+
+void update_cursor(void) {
     outb(0x3D4, 14);
     outb(0x3D5, (cursor_pos >> 8) & 0xFF);
     outb(0x3D4, 15);
@@ -39,7 +105,7 @@ void print_char(char c, unsigned char color, int x, int y) {
     vm[offset + 1] = color;
 }
 
-void clear_screen() {
+void clear_screen(void) {
     unsigned char* vm = (unsigned char*)VGA_MEMORY;
     for (int i = 0; i < VGA_WIDTH * VGA_HEIGHT * 2; i += 2) {
         vm[i] = ' ';
@@ -66,7 +132,7 @@ void print_line(const char* str, unsigned char color) {
     cursor_pos += VGA_WIDTH - (cursor_pos % VGA_WIDTH);
 }
 
-void print_number(int num) {
+void print_int(int num) {
     if (num < 0) {
         print_char('-', WHITE_ON_BLACK, cursor_pos % VGA_WIDTH, cursor_pos / VGA_WIDTH);
         cursor_pos++;
@@ -89,8 +155,47 @@ void print_number(int num) {
     }
 }
 
-void print_result(int num) {
-    print_number(num);
+void print_float(double num) {
+    // Handle negative
+    if (num < 0) {
+        print_char('-', WHITE_ON_BLACK, cursor_pos % VGA_WIDTH, cursor_pos / VGA_WIDTH);
+        cursor_pos++;
+        num = -num;
+    }
+    
+    // Print integer part
+    long int_part = (long)num;
+    if (int_part == 0) {
+        print_char('0', WHITE_ON_BLACK, cursor_pos % VGA_WIDTH, cursor_pos / VGA_WIDTH);
+        cursor_pos++;
+    } else {
+        char buffer[20];
+        int i = 0;
+        long temp = int_part;
+        while (temp > 0) {
+            buffer[i++] = '0' + (temp % 10);
+            temp /= 10;
+        }
+        while (i > 0) {
+            print_char(buffer[--i], WHITE_ON_BLACK, cursor_pos % VGA_WIDTH, cursor_pos / VGA_WIDTH);
+            cursor_pos++;
+        }
+    }
+    
+    // Print decimal part (4 digits)
+    double frac = num - int_part;
+    if (frac > 0.00005) {
+        print_char('.', WHITE_ON_BLACK, cursor_pos % VGA_WIDTH, cursor_pos / VGA_WIDTH);
+        cursor_pos++;
+        
+        for (int i = 0; i < 4; i++) {
+            frac *= 10;
+            int digit = (int)frac;
+            print_char('0' + digit, WHITE_ON_BLACK, cursor_pos % VGA_WIDTH, cursor_pos / VGA_WIDTH);
+            cursor_pos++;
+            frac -= digit;
+        }
+    }
 }
 
 int str_eq(const char* a, const char* b) {
@@ -104,54 +209,12 @@ int str_eq(const char* a, const char* b) {
     return *a == *b;
 }
 
-unsigned int simple_rand() {
+unsigned int simple_rand(void) {
     rand_seed = rand_seed * 1103515245 + 12345;
     return (rand_seed >> 16) & 0x7FFF;
 }
 
-void show_iching() {
-    const char* hexagrams[] = {
-        "== ==  Heaven - Great success awaits",
-        "==    Earth - Be receptive and patient", 
-        "= = = Water - Danger, but persevere",
-        "===== Fire - Clarity and awareness",
-        "= === Thunder - Shock brings renewal",
-        "=== = Wind - Gentle persistence wins",
-        "== == Mountain - Keep still, meditate",
-        "= = == Lake - Joy through sharing"
-    };
-    int idx = simple_rand() % 8;
-    print_line(hexagrams[idx], YELLOW_ON_BLACK);
-}
-
-void show_asciimoji() {
-    const char* mojis[] = {
-        "(^_^)  - Happy!",
-        "(T_T)  - Sad...",
-        "(o_O)  - Surprised!",
-        "(*_*)  - Amazed!",
-        "(>_<)  - Frustrated!",
-        "(@_@)  - Dizzy!",
-        "(^o^)  - Excited!",
-        "(-_-)  - Sleepy..."
-    };
-    int idx = simple_rand() % 8;
-    print_line(mojis[idx], GREEN_ON_BLACK);
-}
-
-void show_lasagna() {
-    print_line("      ~~~~~~~~~~~~~~~~~~~~", YELLOW_ON_BLACK);
-    print_line("     /                    \\", YELLOW_ON_BLACK);
-    print_line("    | ==================== |  <- cheese", YELLOW_ON_BLACK);
-    print_line("    | -------------------- |  <- meat", YELLOW_ON_BLACK);
-    print_line("    | ==================== |  <- pasta", YELLOW_ON_BLACK);
-    print_line("    | -------------------- |  <- sauce", YELLOW_ON_BLACK);
-    print_line("    | ==================== |  <- more cheese!", YELLOW_ON_BLACK);
-    print_line("     \\____________________/", YELLOW_ON_BLACK);
-    print_line("         LASAGNA TIME!", GREEN_ON_BLACK);
-}
-
-char get_key() {
+char get_key(void) {
     static unsigned char normal[] = {
         0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
         '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',
@@ -178,39 +241,28 @@ char get_key() {
     }
 }
 
-int parse_number() {
-    int num = 0;
-    while (input_position < input_length && input_buffer[input_position] == ' ') input_position++;
-    while (input_position < input_length) {
-        char c = input_buffer[input_position];
-        if (c >= '0' && c <= '9') {
-            num = num * 10 + (c - '0');
-        } else break;
-        input_position++;
-    }
-    while (input_position < input_length && input_buffer[input_position] == ' ') input_position++;
-    return num;
-}
-
-int calculate() {
-    input_position = 0;
-    int n1 = parse_number();
-    if (input_position >= input_length) return n1;
-    char op = input_buffer[input_position++];
-    int n2 = parse_number();
-    switch (op) {
-        case '+': return n1 + n2;
-        case '-': return n1 - n2;
-        case '*': return n1 * n2;
-        case '/': return n2 != 0 ? n1 / n2 : 0;
-        default: return 0;
-    }
-}
-
 void __attribute__((section(".text.start"))) kernel_main(void) {
+    // Initialize serial port for debugging
+    serial_init();
+    serial_puts("\n[DEBUG] Calculator OS v0.2 starting...\n");
+    
+    // Initialize FPU for floating point support
+    init_fpu();
+    serial_puts("[DEBUG] FPU initialized\n");
+    
+    // Quick FPU test
+    serial_puts("[DEBUG] Testing FPU: 2.5 + 3.5 = ");
+    volatile double a = 2.5;
+    volatile double b = 3.5;
+    volatile double c = a + b;
+    serial_putdouble(c);
+    serial_puts("\n");
+    serial_puts("[DEBUG] FPU test passed!\n");
+    
     clear_screen();
-    print_line("Calculator OS v2.0", GREEN_ON_BLACK);
-    print_line("Commands: iching, moji, lasagna, or math (e.g. 5+3)", WHITE_ON_BLACK);
+    print_line("Calculator OS v0.2", GREEN_ON_BLACK);
+    print_line("Math: +, -, *, /, %, ^, (), sqrt(), abs(), root(n,x)", WHITE_ON_BLACK);
+    print_line("Extras: iching, moji, lasagna", WHITE_ON_BLACK);
     print_line("Enter=run, ESC=clear, Backspace=delete", WHITE_ON_BLACK);
     print_string("> ", WHITE_ON_BLACK);
     update_cursor();
@@ -235,8 +287,23 @@ void __attribute__((section(".text.start"))) kernel_main(void) {
                 } else if (str_eq(input_buffer, "lasagna")) {
                     show_lasagna();
                 } else {
+                    serial_puts("[DEBUG] Evaluating: ");
+                    serial_puts(input_buffer);
+                    serial_puts("\n");
+                    
                     print_string("= ", WHITE_ON_BLACK);
-                    print_result(calculate());
+                    serial_puts("[DEBUG] Calling evaluate()...\n");
+                    
+                    double result = evaluate(input_buffer, input_length);
+                    
+                    serial_puts("[DEBUG] evaluate() returned: ");
+                    serial_putdouble(result);
+                    serial_puts("\n");
+                    
+                    serial_puts("[DEBUG] Calling print_float()...\n");
+                    print_float(result);
+                    serial_puts("[DEBUG] print_float() done\n");
+                    
                     cursor_pos += VGA_WIDTH - (cursor_pos % VGA_WIDTH);
                 }
                 

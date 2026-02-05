@@ -58,6 +58,16 @@ init_pm:
     mov gs, ax
     mov ebp, 0x90000
     mov esp, ebp
+    
+    ; Enable FPU properly
+    mov eax, cr0
+    and eax, 0xFFFFFFF3  ; Clear EM (bit 2) and TS (bit 3)
+    or eax, 0x22         ; Set MP (bit 1) and NE (bit 5) for internal FPU errors
+    mov cr0, eax
+    
+    ; Initialize FPU
+    fninit
+    
     jmp 0x1000
 
 boot_drive db 0
