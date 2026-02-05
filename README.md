@@ -15,6 +15,12 @@ A minimal OS that boots to a calculator with Level 1 & 2 math support.
 - `moji` - Random asciimoji  
 - `lasagna` - ASCII art
 
+## Keys
+- **Enter**: Calculate/run command
+- **ESC**: Clear input
+- **Backspace**: Delete last char
+- **Page Up/Down**: Scroll through history
+
 ## Build & Run
 ```
 make        # build

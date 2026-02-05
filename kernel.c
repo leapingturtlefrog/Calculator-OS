@@ -13,6 +13,18 @@
 #define GREEN_ON_BLACK VGA_COLOR(2, 0)
 #define YELLOW_ON_BLACK VGA_COLOR(14, 0)
 
+// Scroll buffer configuration
+#define HEADER_LINES 4
+#define CONTENT_LINES (VGA_HEIGHT - HEADER_LINES)
+#define SCROLL_BUFFER_LINES 200
+
+// Scroll buffer: stores lines of text with colors
+char scroll_buffer[SCROLL_BUFFER_LINES][VGA_WIDTH];
+unsigned char scroll_colors[SCROLL_BUFFER_LINES][VGA_WIDTH];
+int buffer_write_line = 0;   // Next line to write in buffer
+int buffer_total_lines = 0;  // Total lines written
+int scroll_offset = 0;       // How many lines scrolled back (0 = latest)
+
 unsigned short cursor_pos = 0;
 char input_buffer[256];
 unsigned char input_length = 0;
@@ -92,10 +104,120 @@ void init_fpu(void) {
 }
 
 void update_cursor(void) {
-    outb(0x3D4, 14);
-    outb(0x3D5, (cursor_pos >> 8) & 0xFF);
-    outb(0x3D4, 15);
-    outb(0x3D5, cursor_pos & 0xFF);
+    // Only show cursor if not scrolled back
+    if (scroll_offset == 0) {
+        outb(0x3D4, 14);
+        outb(0x3D5, (cursor_pos >> 8) & 0xFF);
+        outb(0x3D4, 15);
+        outb(0x3D5, cursor_pos & 0xFF);
+    } else {
+        // Hide cursor when scrolled back
+        outb(0x3D4, 14);
+        outb(0x3D5, 0xFF);
+        outb(0x3D4, 15);
+        outb(0x3D5, 0xFF);
+    }
+}
+
+// Initialize scroll buffer
+void init_scroll_buffer(void) {
+    for (int i = 0; i < SCROLL_BUFFER_LINES; i++) {
+        for (int j = 0; j < VGA_WIDTH; j++) {
+            scroll_buffer[i][j] = ' ';
+            scroll_colors[i][j] = WHITE_ON_BLACK;
+        }
+    }
+    buffer_write_line = 0;
+    buffer_total_lines = 0;
+    scroll_offset = 0;
+}
+
+// Get buffer line index (handles circular buffer)
+int get_buffer_line(int offset_from_latest) {
+    if (buffer_total_lines <= SCROLL_BUFFER_LINES) {
+        return buffer_total_lines - 1 - offset_from_latest;
+    }
+    int idx = buffer_write_line - 1 - offset_from_latest;
+    if (idx < 0) idx += SCROLL_BUFFER_LINES;
+    return idx;
+}
+
+// Redraw the content area from scroll buffer
+void redraw_content(void) {
+    unsigned char* vm = (unsigned char*)VGA_MEMORY;
+    
+    for (int y = 0; y < CONTENT_LINES; y++) {
+        int screen_y = HEADER_LINES + y;
+        int line_offset = scroll_offset + (CONTENT_LINES - 1 - y);
+        
+        if (line_offset < buffer_total_lines) {
+            int buf_idx = get_buffer_line(line_offset);
+            for (int x = 0; x < VGA_WIDTH; x++) {
+                int offset = (screen_y * VGA_WIDTH + x) * 2;
+                vm[offset] = scroll_buffer[buf_idx][x];
+                vm[offset + 1] = scroll_colors[buf_idx][x];
+            }
+        } else {
+            // Clear line if no content
+            for (int x = 0; x < VGA_WIDTH; x++) {
+                int offset = (screen_y * VGA_WIDTH + x) * 2;
+                vm[offset] = ' ';
+                vm[offset + 1] = WHITE_ON_BLACK;
+            }
+        }
+    }
+}
+
+// Add a new line to the scroll buffer
+void buffer_newline(void) {
+    buffer_write_line = (buffer_write_line + 1) % SCROLL_BUFFER_LINES;
+    buffer_total_lines++;
+    
+    // Clear the new line
+    for (int x = 0; x < VGA_WIDTH; x++) {
+        scroll_buffer[buffer_write_line][x] = ' ';
+        scroll_colors[buffer_write_line][x] = WHITE_ON_BLACK;
+    }
+}
+
+// Write a character to the current buffer line
+void buffer_putchar(int x, char c, unsigned char color) {
+    if (buffer_total_lines == 0) {
+        buffer_total_lines = 1;
+    }
+    int buf_idx = (buffer_write_line) % SCROLL_BUFFER_LINES;
+    if (x >= 0 && x < VGA_WIDTH) {
+        scroll_buffer[buf_idx][x] = c;
+        scroll_colors[buf_idx][x] = color;
+    }
+}
+
+// Scroll up the content area (when we reach bottom)
+void scroll_content_up(void) {
+    buffer_newline();
+    redraw_content();
+}
+
+// Scroll view up (Page Up) - shows older content
+void scroll_view_up(void) {
+    int max_scroll = buffer_total_lines - CONTENT_LINES;
+    if (max_scroll < 0) max_scroll = 0;
+    if (scroll_offset < max_scroll) {
+        scroll_offset += (CONTENT_LINES / 2);  // Scroll half page
+        if (scroll_offset > max_scroll) scroll_offset = max_scroll;
+        redraw_content();
+        update_cursor();
+    }
+}
+
+// Scroll view down (Page Down) - shows newer content
+void scroll_view_down(void) {
+    if (scroll_offset > 0) {
+        scroll_offset -= (CONTENT_LINES / 2);  // Scroll half page
+        if (scroll_offset < 0) scroll_offset = 0;
+        redraw_content();
+        update_cursor();
+    }
 }
 
 void print_char(char c, unsigned char color, int x, int y) {
@@ -103,6 +225,11 @@ void print_char(char c, unsigned char color, int x, int y) {
     int offset = (y * VGA_WIDTH + x) * 2;
     vm[offset] = c;
     vm[offset + 1] = color;
+    
+    // Also store in scroll buffer if in content area
+    if (y >= HEADER_LINES && scroll_offset == 0) {
+        buffer_putchar(x, c, color);
+    }
 }
 
 void clear_screen(void) {
@@ -117,10 +244,21 @@ void clear_screen(void) {
 
 void print_string(const char* str, unsigned char color) {
     while (*str) {
+        int y = cursor_pos / VGA_WIDTH;
+        int x = cursor_pos % VGA_WIDTH;
+        
+        // Check if we need to scroll
+        if (y >= VGA_HEIGHT) {
+            scroll_content_up();
+            cursor_pos = (VGA_HEIGHT - 1) * VGA_WIDTH;
+            y = VGA_HEIGHT - 1;
+            x = 0;
+        }
+        
         if (*str == '\n') {
             cursor_pos += VGA_WIDTH - (cursor_pos % VGA_WIDTH);
         } else {
-            print_char(*str, color, cursor_pos % VGA_WIDTH, cursor_pos / VGA_WIDTH);
+            print_char(*str, color, x, y);
             cursor_pos++;
         }
         str++;
@@ -129,7 +267,20 @@ void print_string(const char* str, unsigned char color) {
 
 void print_line(const char* str, unsigned char color) {
     print_string(str, color);
+    
+    // Add current line to buffer before moving to next
+    if (cursor_pos / VGA_WIDTH >= HEADER_LINES && scroll_offset == 0) {
+        buffer_newline();
+    }
+    
+    // Move to next line
     cursor_pos += VGA_WIDTH - (cursor_pos % VGA_WIDTH);
+    
+    // Check if we need to scroll
+    if (cursor_pos / VGA_WIDTH >= VGA_HEIGHT) {
+        scroll_content_up();
+        cursor_pos = (VGA_HEIGHT - 1) * VGA_WIDTH;
+    }
 }
 
 void print_int(int num) {
@@ -214,6 +365,10 @@ unsigned int simple_rand(void) {
     return (rand_seed >> 16) & 0x7FFF;
 }
 
+// Special key codes returned by get_key
+#define KEY_PAGE_UP 128
+#define KEY_PAGE_DOWN 129
+
 char get_key(void) {
     static unsigned char normal[] = {
         0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
@@ -233,7 +388,19 @@ char get_key(void) {
         unsigned char sc = inb(0x60);
         if (sc == 0x2A || sc == 0x36) { shift_pressed = 1; continue; }
         if (sc == 0xAA || sc == 0xB6) { shift_pressed = 0; continue; }
-        if (sc & 0x80) continue;
+        if (sc & 0x80) continue;  // Key release
+        
+        // Page Up (scancode 0x49)
+        if (sc == 0x49) {
+            rand_seed ^= sc * 31337;
+            return KEY_PAGE_UP;
+        }
+        // Page Down (scancode 0x51)
+        if (sc == 0x51) {
+            rand_seed ^= sc * 31337;
+            return KEY_PAGE_DOWN;
+        }
+        
         if (sc < 60) {
             rand_seed ^= sc * 31337;
             return shift_pressed ? shifted[sc] : normal[sc];
@@ -259,11 +426,18 @@ void __attribute__((section(".text.start"))) kernel_main(void) {
     serial_puts("\n");
     serial_puts("[DEBUG] FPU test passed!\n");
     
+    // Initialize scroll buffer
+    init_scroll_buffer();
+    
     clear_screen();
+    // Print fixed header (lines 0-3)
     print_line("Calculator OS v0.2", GREEN_ON_BLACK);
     print_line("Math: +, -, *, /, %, ^, (), sqrt(), abs(), root(n,x)", WHITE_ON_BLACK);
-    print_line("Extras: iching, moji, lasagna", WHITE_ON_BLACK);
+    print_line("Extras: iching, moji, lasagna | PgUp/PgDn: scroll", WHITE_ON_BLACK);
     print_line("Enter=run, ESC=clear, Backspace=delete", WHITE_ON_BLACK);
+    
+    // Start content area at line 4
+    cursor_pos = HEADER_LINES * VGA_WIDTH;
     print_string("> ", WHITE_ON_BLACK);
     update_cursor();
     
@@ -274,7 +448,18 @@ void __attribute__((section(".text.start"))) kernel_main(void) {
         char key = get_key();
         
         if (key == '\n') {
+            // Return to current if scrolled back
+            if (scroll_offset > 0) {
+                scroll_offset = 0;
+                redraw_content();
+            }
+            
+            // Move to next line, scroll if needed
             cursor_pos += VGA_WIDTH - (cursor_pos % VGA_WIDTH);
+            if (cursor_pos / VGA_WIDTH >= VGA_HEIGHT) {
+                scroll_content_up();
+                cursor_pos = (VGA_HEIGHT - 1) * VGA_WIDTH;
+            }
             update_cursor();
             
             if (input_length > 0) {
@@ -304,9 +489,19 @@ void __attribute__((section(".text.start"))) kernel_main(void) {
                     print_float(result);
                     serial_puts("[DEBUG] print_float() done\n");
                     
+                    // Move to next line, scroll if needed
                     cursor_pos += VGA_WIDTH - (cursor_pos % VGA_WIDTH);
+                    if (cursor_pos / VGA_WIDTH >= VGA_HEIGHT) {
+                        scroll_content_up();
+                        cursor_pos = (VGA_HEIGHT - 1) * VGA_WIDTH;
+                    }
                 }
                 
+                // Print prompt, scroll if needed
+                if (cursor_pos / VGA_WIDTH >= VGA_HEIGHT) {
+                    scroll_content_up();
+                    cursor_pos = (VGA_HEIGHT - 1) * VGA_WIDTH;
+                }
                 print_string("> ", WHITE_ON_BLACK);
                 update_cursor();
                 input_length = 0;
@@ -324,8 +519,25 @@ void __attribute__((section(".text.start"))) kernel_main(void) {
                 print_char(' ', WHITE_ON_BLACK, cursor_pos % VGA_WIDTH, cursor_pos / VGA_WIDTH);
             }
             update_cursor();
+        } else if (key == KEY_PAGE_UP) {
+            scroll_view_up();
+        } else if (key == KEY_PAGE_DOWN) {
+            scroll_view_down();
         } else if (key >= 32 && key <= 126 && input_length < 255) {
+            // If scrolled back, return to current before typing
+            if (scroll_offset > 0) {
+                scroll_offset = 0;
+                redraw_content();
+            }
             input_buffer[input_length++] = key;
+            
+            // Check if we need to scroll before printing
+            int y = cursor_pos / VGA_WIDTH;
+            if (y >= VGA_HEIGHT) {
+                scroll_content_up();
+                cursor_pos = (VGA_HEIGHT - 1) * VGA_WIDTH;
+            }
+            
             print_char(key, WHITE_ON_BLACK, cursor_pos % VGA_WIDTH, cursor_pos / VGA_WIDTH);
             cursor_pos++;
             update_cursor();
