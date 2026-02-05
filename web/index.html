@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Calculator OS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #000;
+            color: #fff;
+            font-family: monospace;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px;
+        }
+        h1 { margin: 10px 0; font-size: 16px; font-weight: normal; }
+        #screen_container {
+            background: #000;
+            border: 1px solid #444;
+        }
+        #screen_container canvas { display: block; }
+        .controls { margin: 10px 0; }
+        button {
+            background: #000;
+            color: #fff;
+            border: 1px solid #666;
+            padding: 5px 15px;
+            margin: 0 5px;
+            cursor: pointer;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        button:hover { background: #333; }
+        #status { font-size: 11px; color: #666; }
+        .loading { color: #888; padding: 50px; }
+    </style>
+</head>
+<body>
+    <h1>Calculator OS</h1>
+    <div id="screen_container">
+        <div class="loading">Loading...</div>
+    </div>
+    <div class="controls">
+        <button onclick="emulator.restart()">Restart</button>
+        <button onclick="var c = document.querySelector('#screen_container canvas'); if(c) c.focus();">Focus</button>
+    </div>
+    <div id="status"></div>
+
+    <script src="libv86.js"></script>
+    <script>
+        "use strict";
+        var emulator;
+        var statusEl;
+        
+        function updateStatus(msg, isError) {
+            console.log(msg);
+            if (statusEl) {
+                statusEl.textContent = msg;
+                statusEl.style.color = isError ? '#a00' : '#666';
+            }
+        }
+        
+        window.onload = function() {
+            statusEl = document.getElementById("status");
+            
+            if (typeof SharedArrayBuffer === 'undefined') {
+                updateStatus('Error: SharedArrayBuffer not available. Use server.py', true);
+                document.querySelector('.loading').textContent = 'Error: SharedArrayBuffer required';
+                return;
+            }
+            
+            if (typeof V86 === 'undefined') {
+                updateStatus('Error: v86 library failed to load', true);
+                return;
+            }
+            
+            updateStatus('Starting...');
+            
+            try {
+                emulator = new V86({
+                    wasm_path: "v86.wasm",
+                    memory_size: 16 * 1024 * 1024,
+                    vga_memory_size: 2 * 1024 * 1024,
+                    screen_container: document.getElementById("screen_container"),
+                    bios: { url: "bios/seabios.bin" },
+                    vga_bios: { url: "bios/vgabios.bin" },
+                    fda: { url: "os.img" },
+                    autostart: true
+                });
+                
+                emulator.add_listener("emulator-ready", function() {
+                    updateStatus("Ready");
+                });
+                
+                emulator.add_listener("emulator-started", function() {
+                    updateStatus("Running");
+                    setTimeout(function() {
+                        var canvas = document.querySelector("#screen_container canvas");
+                        if (canvas) canvas.focus();
+                    }, 100);
+                });
+                
+                emulator.add_listener("emulator-stopped", function() {
+                    updateStatus("Stopped", true);
+                });
+            } catch (e) {
+                updateStatus('Error: ' + e.message, true);
+                console.error(e);
+            }
+        };
+    </script>
+</body>
+</html>
