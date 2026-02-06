@@ -433,7 +433,7 @@ void __attribute__((section(".text.start"))) kernel_main(void) {
     // Print fixed header (lines 0-3)
     print_line("Calculator OS v0.2", GREEN_ON_BLACK);
     print_line("Math: +, -, *, /, %, ^, (), sqrt(), abs(), root(n,x)", WHITE_ON_BLACK);
-    print_line("Extras: iching, moji, lasagna | PgUp/PgDn: scroll", WHITE_ON_BLACK);
+    print_line("Extras: iching, moji, lasagna", WHITE_ON_BLACK);
     print_line("Enter=run, ESC=clear, Backspace=delete", WHITE_ON_BLACK);
     
     // Start content area at line 4

@@ -4,47 +4,58 @@ LD = ld
 CFLAGS = -m32 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -mno-sse -mno-sse2 -mfpmath=387 -O2 -c
 LDFLAGS = -m elf_i386 -T linker.ld -nostdlib
 
-OBJECTS = kernel.o math.o extras.o
+OUT = out
+OBJDIR = $(OUT)/obj
+BINDIR = $(OUT)/bin
+OSDIR = $(OUT)/os
 
-all: os.img web/os.img
+OBJECTS = $(OBJDIR)/kernel.o $(OBJDIR)/math.o $(OBJDIR)/extras.o
 
-bootloader.bin: bootloader.asm
-	$(AS) -f bin bootloader.asm -o bootloader.bin
+all: $(OSDIR)/os.img web/os.img
 
-kernel.o: kernel.c math.h extras.h
-	$(CC) $(CFLAGS) kernel.c -o kernel.o
+$(BINDIR)/bootloader.bin: bootloader.asm
+	mkdir -p $(BINDIR)
+	$(AS) -f bin bootloader.asm -o $(BINDIR)/bootloader.bin
 
-math.o: math.c math.h
-	$(CC) $(CFLAGS) math.c -o math.o
+$(OBJDIR)/kernel.o: kernel.c math.h extras.h
+	mkdir -p $(OBJDIR)
+	$(CC) $(CFLAGS) kernel.c -o $(OBJDIR)/kernel.o
 
-extras.o: extras.c extras.h
-	$(CC) $(CFLAGS) extras.c -o extras.o
+$(OBJDIR)/math.o: math.c math.h
+	mkdir -p $(OBJDIR)
+	$(CC) $(CFLAGS) math.c -o $(OBJDIR)/math.o
 
-kernel.bin: $(OBJECTS)
-	$(LD) $(LDFLAGS) -o kernel.elf $(OBJECTS)
-	objcopy -O binary kernel.elf kernel.bin
+$(OBJDIR)/extras.o: extras.c extras.h
+	mkdir -p $(OBJDIR)
+	$(CC) $(CFLAGS) extras.c -o $(OBJDIR)/extras.o
 
-os.img: bootloader.bin kernel.bin
-	cat bootloader.bin kernel.bin > os.img
-	dd if=/dev/zero bs=512 count=2880 >> os.img 2>/dev/null
-	dd if=os.img of=os.img bs=512 count=2880 conv=notrunc 2>/dev/null
+$(BINDIR)/kernel.bin: $(OBJECTS)
+	mkdir -p $(BINDIR)
+	$(LD) $(LDFLAGS) -o $(BINDIR)/kernel.elf $(OBJECTS)
+	objcopy -O binary $(BINDIR)/kernel.elf $(BINDIR)/kernel.bin
 
-web/os.img: os.img
+$(OSDIR)/os.img: $(BINDIR)/bootloader.bin $(BINDIR)/kernel.bin
+	mkdir -p $(OSDIR)
+	cat $(BINDIR)/bootloader.bin $(BINDIR)/kernel.bin > $(OSDIR)/os.img
+	dd if=/dev/zero bs=512 count=2880 >> $(OSDIR)/os.img 2>/dev/null
+	dd if=$(OSDIR)/os.img of=$(OSDIR)/os.img bs=512 count=2880 conv=notrunc 2>/dev/null
+
+web/os.img: $(OSDIR)/os.img
 	mkdir -p web
-	cp os.img web/os.img
+	cp $(OSDIR)/os.img web/os.img
 
-run: os.img
-	qemu-system-i386 -drive file=os.img,format=raw,if=floppy
+run: $(OSDIR)/os.img
+	qemu-system-i386 -drive file=$(OSDIR)/os.img,format=raw,if=floppy
 
 # Test mode - runs headlessly with serial output to terminal
-test: os.img
-	qemu-system-i386 -drive file=os.img,format=raw,if=floppy -serial stdio -display curses
+test: $(OSDIR)/os.img
+	qemu-system-i386 -drive file=$(OSDIR)/os.img,format=raw,if=floppy -serial stdio -display curses
 
 # Debug mode - no display, just serial output (runs for 5 seconds)
-test-headless: os.img
-	timeout 5 qemu-system-i386 -drive file=os.img,format=raw,if=floppy -serial stdio -display none || true
+test-headless: $(OSDIR)/os.img
+	timeout 5 qemu-system-i386 -drive file=$(OSDIR)/os.img,format=raw,if=floppy -serial stdio -display none || true
 
 clean:
-	rm -f *.o *.bin *.elf os.img web/os.img
+	rm -rf $(OUT)
 
 .PHONY: all run clean test test-headless
