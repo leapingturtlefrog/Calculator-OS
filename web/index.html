@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Calculator OS</title>
     <link rel="icon" type="image/x-icon" href="/images/beancan.ico">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/simple-keyboard@3.7/build/css/index.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
         
@@ -34,7 +35,6 @@
             width: 100%;
         }
         
-        /* Monitor frame - old wall-mounted style */
         .monitor {
             background: #c0c0c0;
             padding: 12px;
@@ -57,7 +57,6 @@
             width: 649px;
             height: 508px;
             max-width: 100%;
-            transition: width 0.2s ease, height 0.2s ease;
         }
         
         #screen_container canvas {
@@ -157,6 +156,79 @@
             color: #aaa;
         }
         
+        /* On-screen keyboard - retro style */
+        #keyboard-container {
+            margin-top: 15px;
+            max-width: 400px;
+            width: 100%;
+        }
+        
+        .simple-keyboard {
+            background: #c0c0c0;
+            padding: 8px;
+            border: 4px solid #808080;
+            border-top-color: #fff;
+            border-left-color: #fff;
+            border-radius: 0;
+        }
+        
+        .simple-keyboard .hg-button {
+            font-family: 'VT323', monospace;
+            font-size: 18px;
+            background: #c0c0c0;
+            color: #000;
+            border: 3px solid #808080;
+            border-top-color: #fff;
+            border-left-color: #fff;
+            border-radius: 0;
+            height: 40px;
+            cursor: pointer;
+        }
+        
+        .simple-keyboard .hg-button:hover {
+            background: #d0d0d0;
+        }
+        
+        .simple-keyboard .hg-button:active,
+        .simple-keyboard .hg-button.hg-activeButton {
+            background: #a0a0a0;
+            border-top-color: #808080;
+            border-left-color: #808080;
+            border-bottom-color: #fff;
+            border-right-color: #fff;
+        }
+        
+        .simple-keyboard .hg-row {
+            gap: 4px;
+            margin-bottom: 4px;
+        }
+        
+        .simple-keyboard .hg-row:last-child {
+            margin-bottom: 0;
+        }
+        
+        /* Special button colors */
+        .simple-keyboard .hg-button[data-skbtn="{enter}"] {
+            background: #90c090;
+            border-top-color: #c0f0c0;
+            border-left-color: #c0f0c0;
+        }
+        
+        .simple-keyboard .hg-button[data-skbtn="{enter}"]:hover {
+            background: #a0d0a0;
+        }
+        
+        .simple-keyboard .hg-button[data-skbtn="{bksp}"],
+        .simple-keyboard .hg-button[data-skbtn="{esc}"] {
+            background: #c09090;
+            border-top-color: #f0c0c0;
+            border-left-color: #f0c0c0;
+        }
+        
+        .simple-keyboard .hg-button[data-skbtn="{bksp}"]:hover,
+        .simple-keyboard .hg-button[data-skbtn="{esc}"]:hover {
+            background: #d0a0a0;
+        }
 
     </style>
 </head>
@@ -177,6 +249,10 @@
         </div>
     </div>
     
+    <div id="keyboard-container">
+        <div class="simple-keyboard"></div>
+    </div>
+    
     <div class="controls">
         <button onclick="emulator.restart()">Restart</button>
         <button onclick="var c = document.querySelector('#screen_container canvas'); if(c) c.focus();">Focus</button>
@@ -185,9 +261,11 @@
     <div id="footer">A project by <a href="https://x.com/alexaridgides" target="_blank" rel="noopener">Alex Aridgides</a></div>
 
     <script src="/calculator-os/libv86.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simple-keyboard@3.7/build/index.min.js"></script>
     <script>
         "use strict";
         var emulator;
+        var keyboard;
         var statusEl;
         var powerLed;
         var computerEl;
@@ -196,6 +274,43 @@
         var computerBaseHeight;
         var controlsEl;
         var footerEl;
+        
+        // Simple scancode map for calculator keys
+        var keyScancodes = {
+            '0': [0x0B], '1': [0x02], '2': [0x03], '3': [0x04], '4': [0x05],
+            '5': [0x06], '6': [0x07], '7': [0x08], '8': [0x09], '9': [0x0A],
+            '.': [0x34],
+            '+': [0x2A, 0x0D],  // Shift + =
+            '-': [0x0C],
+            '*': [0x2A, 0x09],  // Shift + 8
+            '/': [0x35],
+            '^': [0x2A, 0x07],  // Shift + 6
+            '%': [0x2A, 0x06],  // Shift + 5
+            '(': [0x2A, 0x0A],  // Shift + 9
+            ')': [0x2A, 0x0B],  // Shift + 0
+            '{enter}': [0x1C],
+            '{bksp}': [0x0E],
+            '{esc}': [0x01]
+        };
+        
+        // Keys that need shift released after
+        var shiftKeys = ['+', '*', '^', '%', '(', ')'];
+        
+        function sendKey(key) {
+            if (!emulator) return;
+            var codes = keyScancodes[key];
+            if (!codes) return;
+            
+            // Send all key presses
+            for (var i = 0; i < codes.length; i++) {
+                emulator.keyboard_send_scancodes([codes[i]]);
+            }
+            
+            // Send key releases in reverse order
+            for (var i = codes.length - 1; i >= 0; i--) {
+                emulator.keyboard_send_scancodes([codes[i] | 0x80]);
+            }
+        }
         
         function updateStatus(msg, isError) {
             console.log(msg);
@@ -211,7 +326,8 @@
             var controlsHeight = controlsEl ? controlsEl.getBoundingClientRect().height : 0;
             var statusHeight = statusEl ? statusEl.getBoundingClientRect().height : 0;
             var footerHeight = footerEl ? footerEl.getBoundingClientRect().height : 0;
-            var availableHeight = window.innerHeight - 40 - 20 - 10 - 10 - controlsHeight - statusHeight - footerHeight;
+            var keyboardHeight = document.getElementById('keyboard-container') ? document.getElementById('keyboard-container').getBoundingClientRect().height : 0;
+            var availableHeight = window.innerHeight - 40 - 20 - 10 - 10 - controlsHeight - statusHeight - footerHeight - keyboardHeight - 20;
             var widthScale = availableWidth / computerBaseWidth;
             var heightScale = availableHeight / computerBaseHeight;
             var scale = 1;
@@ -222,6 +338,32 @@
             computerScaleEl.style.height = (computerBaseHeight * scale) + "px";
         }
         
+        function setupKeyboard() {
+            var Keyboard = window.SimpleKeyboard.default;
+            
+            keyboard = new Keyboard('.simple-keyboard', {
+                onKeyPress: function(button) {
+                    sendKey(button);
+                },
+                layout: {
+                    default: [
+                        "7 8 9 / (",
+                        "4 5 6 * )",
+                        "1 2 3 - ^",
+                        "0 . {enter} + %",
+                        "{bksp} {esc}"
+                    ]
+                },
+                display: {
+                    '{enter}': '=',
+                    '{bksp}': 'Del',
+                    '{esc}': 'Clr'
+                },
+                theme: "hg-theme-default",
+                disableButtonHold: true
+            });
+        }
+        
         window.onload = function() {
             statusEl = document.getElementById("status");
             powerLed = document.getElementById("power-led");
@@ -229,6 +371,12 @@
             footerEl = document.getElementById("footer");
             computerEl = document.querySelector(".computer");
             computerScaleEl = document.getElementById("computer_scale");
+            
+            // Setup keyboard first
+            if (typeof window.SimpleKeyboard !== 'undefined') {
+                setupKeyboard();
+            }
+            
             if (computerEl && computerScaleEl) {
                 var rect = computerEl.getBoundingClientRect();
                 computerBaseWidth = rect.width;
@@ -269,10 +417,6 @@
                 emulator.add_listener("emulator-started", function() {
                     updateStatus("Running");
                     if (powerLed) powerLed.classList.add('on');
-                    setTimeout(function() {
-                        var canvas = document.querySelector("#screen_container canvas");
-                        if (canvas) canvas.focus();
-                    }, 100);
                 });
                 
                 emulator.add_listener("emulator-stopped", function() {
