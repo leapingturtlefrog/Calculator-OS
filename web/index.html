@@ -156,19 +156,69 @@
             color: #aaa;
         }
         
+        /* Cable connecting monitor to keyboard */
+        .cable-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 20px;
+        }
+        
+        .cable {
+            width: 6px;
+            height: 20px;
+            background: linear-gradient(90deg, #2a2a2a 0%, #4a4a4a 30%, #3a3a3a 50%, #4a4a4a 70%, #2a2a2a 100%);
+            border-radius: 3px;
+            box-shadow: inset 0 0 2px rgba(0,0,0,0.5);
+        }
+        
         /* On-screen keyboard - retro style */
         #keyboard-container {
-            margin-top: 15px;
             max-width: 400px;
             width: 100%;
         }
         
-        .simple-keyboard {
+        .keyboard-frame {
             background: #c0c0c0;
             padding: 8px;
             border: 4px solid #808080;
             border-top-color: #fff;
             border-left-color: #fff;
+            position: relative;
+        }
+        
+        .keyboard-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #a0a0a0;
+        }
+        
+        .keyboard-led {
+            width: 8px;
+            height: 8px;
+            background: #440000;
+            border: 1px solid #220000;
+        }
+        
+        .keyboard-led.connected {
+            background: #00ff00;
+            box-shadow: 0 0 4px #00ff00;
+        }
+        
+        .keyboard-label {
+            font-size: 10px;
+            color: #606060;
+            letter-spacing: 1px;
+        }
+        
+        .simple-keyboard {
+            background: #c0c0c0;
+            padding: 8px;
+            border: none;
             border-radius: 0;
         }
         
@@ -249,8 +299,18 @@
         </div>
     </div>
     
+    <div class="cable-container">
+        <div class="cable"></div>
+    </div>
+    
     <div id="keyboard-container">
-        <div class="simple-keyboard"></div>
+        <div class="keyboard-frame">
+            <div class="keyboard-header">
+                <div class="keyboard-led" id="keyboard-led"></div>
+                <span class="keyboard-label">CONNECTED</span>
+            </div>
+            <div class="simple-keyboard"></div>
+        </div>
     </div>
     
     <div class="controls">
@@ -268,6 +328,7 @@
         var keyboard;
         var statusEl;
         var powerLed;
+        var keyboardLed;
         var computerEl;
         var computerScaleEl;
         var computerBaseWidth;
@@ -367,6 +428,7 @@
         window.onload = function() {
             statusEl = document.getElementById("status");
             powerLed = document.getElementById("power-led");
+            keyboardLed = document.getElementById("keyboard-led");
             controlsEl = document.querySelector(".controls");
             footerEl = document.getElementById("footer");
             computerEl = document.querySelector(".computer");
@@ -417,11 +479,13 @@
                 emulator.add_listener("emulator-started", function() {
                     updateStatus("Running");
                     if (powerLed) powerLed.classList.add('on');
+                    if (keyboardLed) keyboardLed.classList.add('connected');
                 });
                 
                 emulator.add_listener("emulator-stopped", function() {
                     updateStatus("Stopped", true);
                     if (powerLed) powerLed.classList.remove('on');
+                    if (keyboardLed) keyboardLed.classList.remove('connected');
                 });
             } catch (e) {
                 updateStatus('Error: ' + e.message, true);
