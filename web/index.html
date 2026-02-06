@@ -183,7 +183,7 @@
     <div id="status"></div>
     <div id="footer">A project by <a href="https://x.com/alexaridgides" target="_blank" rel="noopener">Alex Aridgides</a></div>
 
-    <script src="libv86.js"></script>
+    <script src="/calculator-os/libv86.js"></script>
     <script>
         "use strict";
         var emulator;
@@ -251,13 +251,13 @@
             
             try {
                 emulator = new V86({
-                    wasm_path: "v86.wasm",
+                    wasm_path: "/calculator-os/v86.wasm",
                     memory_size: 16 * 1024 * 1024,
                     vga_memory_size: 2 * 1024 * 1024,
                     screen_container: document.getElementById("screen_container"),
-                    bios: { url: "bios/seabios.bin" },
-                    vga_bios: { url: "bios/vgabios.bin" },
-                    fda: { url: "os.img" },
+                    bios: { url: "/calculator-os/bios/seabios.bin" },
+                    vga_bios: { url: "/calculator-os/bios/vgabios.bin" },
+                    fda: { url: "/calculator-os/os.img" },
                     autostart: true
                 });
                 
