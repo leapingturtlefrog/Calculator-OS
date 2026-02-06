@@ -6,7 +6,7 @@ LDFLAGS = -m elf_i386 -T linker.ld -nostdlib
 
 OBJECTS = kernel.o math.o extras.o
 
-all: os.img
+all: os.img web/os.img
 
 bootloader.bin: bootloader.asm
 	$(AS) -f bin bootloader.asm -o bootloader.bin
@@ -29,6 +29,10 @@ os.img: bootloader.bin kernel.bin
 	dd if=/dev/zero bs=512 count=2880 >> os.img 2>/dev/null
 	dd if=os.img of=os.img bs=512 count=2880 conv=notrunc 2>/dev/null
 
+web/os.img: os.img
+	mkdir -p web
+	cp os.img web/os.img
+
 run: os.img
 	qemu-system-i386 -drive file=os.img,format=raw,if=floppy
 
@@ -41,6 +45,6 @@ test-headless: os.img
 	timeout 5 qemu-system-i386 -drive file=os.img,format=raw,if=floppy -serial stdio -display none || true
 
 clean:
-	rm -f *.o *.bin *.elf os.img
+	rm -f *.o *.bin *.elf os.img web/os.img
 
 .PHONY: all run clean test test-headless

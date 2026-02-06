@@ -5,70 +5,240 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Calculator OS</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+        
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: #000;
-            color: #fff;
-            font-family: monospace;
+            background: #2a2a3a;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 10px;
+            justify-content: center;
+            padding: 20px;
+            font-family: 'VT323', monospace;
         }
-        h1 { margin: 10px 0; font-size: 16px; font-weight: normal; }
+        
+        .computer {
+            position: relative;
+            image-rendering: pixelated;
+            transform-origin: top center;
+            transition: transform 0.2s ease;
+        }
+
+        #computer_scale {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            width: 100%;
+        }
+        
+        /* Monitor frame - old wall-mounted style */
+        .monitor {
+            background: #c0c0c0;
+            padding: 12px;
+            border: 4px solid #808080;
+            border-top-color: #fff;
+            border-left-color: #fff;
+        }
+        
+        .screen-bezel {
+            background: #404040;
+            padding: 4px;
+            border: 4px solid #606060;
+            border-top-color: #303030;
+            border-left-color: #303030;
+        }
+        
         #screen_container {
             background: #000;
-            border: 1px solid #444;
+            border: 2px solid #000;
+            width: 649px;
+            height: 508px;
+            max-width: 100%;
+            transition: width 0.2s ease, height 0.2s ease;
         }
-        #screen_container canvas { display: block; }
-        .controls { margin: 10px 0; }
+        
+        #screen_container canvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+        
+        .loading {
+            color: #888;
+            font-family: 'VT323', monospace;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+        }
+        
+        .monitor-bottom {
+            background: #c0c0c0;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            border: 4px solid #808080;
+            border-top: none;
+            border-bottom-color: #fff;
+            border-right-color: #fff;
+        }
+        
+        .led {
+            width: 8px;
+            height: 8px;
+            background: #004400;
+            border: 1px solid #002200;
+        }
+        
+        .led.on {
+            background: #00ff00;
+            box-shadow: 0 0 4px #00ff00;
+        }
+        
+        .brand {
+            font-size: 10px;
+            color: #606060;
+            letter-spacing: 2px;
+        }
+        
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 8px;
+        }
+        
         button {
-            background: #000;
-            color: #fff;
-            border: 1px solid #666;
-            padding: 5px 15px;
-            margin: 0 5px;
+            font-family: 'VT323', monospace;
+            font-size: 16px;
+            background: #c0c0c0;
+            color: #000;
+            border: 3px solid #808080;
+            border-top-color: #fff;
+            border-left-color: #fff;
+            padding: 4px 16px;
             cursor: pointer;
-            font-family: monospace;
-            font-size: 12px;
         }
-        button:hover { background: #333; }
-        #status { font-size: 11px; color: #666; }
-        .loading { color: #888; padding: 50px; }
+        
+        button:hover {
+            background: #d0d0d0;
+        }
+        
+        button:active {
+            border-top-color: #808080;
+            border-left-color: #808080;
+            border-bottom-color: #fff;
+            border-right-color: #fff;
+        }
+        
+        #status {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #888;
+        }
+
+        #footer {
+            margin-top: auto;
+            padding-top: 10px;
+            font-size: 14px;
+            color: #888;
+        }
+
+        #footer a {
+            color: #888;
+            text-decoration: underline;
+        }
+
+        #footer a:hover {
+            color: #aaa;
+        }
+        
+
     </style>
 </head>
 <body>
-    <h1>Calculator OS</h1>
-    <div id="screen_container">
-        <div class="loading">Loading...</div>
+    <div id="computer_scale">
+        <div class="computer">
+            <div class="monitor">
+                <div class="screen-bezel">
+                    <div id="screen_container">
+                        <div class="loading">Loading...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="monitor-bottom">
+                <div class="led" id="power-led"></div>
+                <span class="brand">Calculator OS</span>
+            </div>
+        </div>
     </div>
+    
     <div class="controls">
         <button onclick="emulator.restart()">Restart</button>
         <button onclick="var c = document.querySelector('#screen_container canvas'); if(c) c.focus();">Focus</button>
     </div>
     <div id="status"></div>
+    <div id="footer">A project by <a href="https://x.com/alexaridgides" target="_blank" rel="noopener">Alex Aridgides</a></div>
 
     <script src="libv86.js"></script>
     <script>
         "use strict";
         var emulator;
         var statusEl;
+        var powerLed;
+        var computerEl;
+        var computerScaleEl;
+        var computerBaseWidth;
+        var computerBaseHeight;
+        var controlsEl;
+        var footerEl;
         
         function updateStatus(msg, isError) {
             console.log(msg);
             if (statusEl) {
                 statusEl.textContent = msg;
-                statusEl.style.color = isError ? '#a00' : '#666';
+                statusEl.style.color = isError ? '#f44' : '#888';
             }
+        }
+
+        function updateComputerScale() {
+            if (!computerEl || !computerScaleEl || !computerBaseWidth || !computerBaseHeight) return;
+            var availableWidth = window.innerWidth - 40;
+            var controlsHeight = controlsEl ? controlsEl.getBoundingClientRect().height : 0;
+            var statusHeight = statusEl ? statusEl.getBoundingClientRect().height : 0;
+            var footerHeight = footerEl ? footerEl.getBoundingClientRect().height : 0;
+            var availableHeight = window.innerHeight - 40 - 20 - 10 - 10 - controlsHeight - statusHeight - footerHeight;
+            var widthScale = availableWidth / computerBaseWidth;
+            var heightScale = availableHeight / computerBaseHeight;
+            var scale = 1;
+            if (availableWidth < 750 || availableHeight < computerBaseHeight) {
+                scale = Math.min(1, widthScale, heightScale);
+            }
+            computerEl.style.transform = "scale(" + scale + ")";
+            computerScaleEl.style.height = (computerBaseHeight * scale) + "px";
         }
         
         window.onload = function() {
             statusEl = document.getElementById("status");
+            powerLed = document.getElementById("power-led");
+            controlsEl = document.querySelector(".controls");
+            footerEl = document.getElementById("footer");
+            computerEl = document.querySelector(".computer");
+            computerScaleEl = document.getElementById("computer_scale");
+            if (computerEl && computerScaleEl) {
+                var rect = computerEl.getBoundingClientRect();
+                computerBaseWidth = rect.width;
+                computerBaseHeight = rect.height;
+                updateComputerScale();
+                window.addEventListener("resize", updateComputerScale);
+            }
             
             if (typeof SharedArrayBuffer === 'undefined') {
                 updateStatus('Error: SharedArrayBuffer not available. Use server.py', true);
-                document.querySelector('.loading').textContent = 'Error: SharedArrayBuffer required';
+                document.querySelector('.loading').textContent = 'SharedArrayBuffer required';
                 return;
             }
             
@@ -97,6 +267,7 @@
                 
                 emulator.add_listener("emulator-started", function() {
                     updateStatus("Running");
+                    if (powerLed) powerLed.classList.add('on');
                     setTimeout(function() {
                         var canvas = document.querySelector("#screen_container canvas");
                         if (canvas) canvas.focus();
@@ -105,6 +276,7 @@
                 
                 emulator.add_listener("emulator-stopped", function() {
                     updateStatus("Stopped", true);
+                    if (powerLed) powerLed.classList.remove('on');
                 });
             } catch (e) {
                 updateStatus('Error: ' + e.message, true);
